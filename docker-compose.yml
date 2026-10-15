@@ -1,0 +1,27 @@
+services:
+  tatadana:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tatadana-app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - WEBHOOK_BASE_URL=${WEBHOOK_BASE_URL}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_STORAGE_BUCKET=${SUPABASE_STORAGE_BUCKET:-tatadana-exports}
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+      - TIMEZONE=${TIMEZONE:-Asia/Jakarta}
+    volumes:
+      - tatadana_data:/app/.data
+
+volumes:
+  tatadana_data:
+    driver: local
