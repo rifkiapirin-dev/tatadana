@@ -7,15 +7,11 @@ import {
   Lock,
   Mail,
   Phone,
-  ArrowRight,
   ShieldCheck,
   Sparkles,
   AlertTriangle,
   Clock,
   XCircle,
-  UserCheck,
-  Shield,
-  Zap,
   MessageCircle,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
@@ -36,26 +32,13 @@ export default function LoginPage() {
   const router = useRouter();
   const { switchUser, notify } = useApp();
   const [method, setMethod] = useState<'email' | 'phone'>('email');
-  const [email, setEmail] = useState('rifkiarifin@gmail.com');
-  const [password, setPassword] = useState('123456789');
-  const [phone, setPhone] = useState('083851284143');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [statusInfo, setStatusInfo] = useState<LoginStatusInfo | null>(null);
-
-  const adminAccount = {
-    id: 'usr-admin-rifki',
-    label: '👑 Akun Khusus Admin',
-    email: 'rifkiarifin@gmail.com',
-    password: '123456789',
-    phone: '083851284143',
-    name: 'Rifki Arifin (Admin)',
-    badge: 'Superadmin',
-    badgeColor: 'bg-emerald-500/15 text-emerald-800 border-emerald-400 font-extrabold',
-    icon: Shield,
-    targetPath: '/dashboard',
-  };
 
   const executeLogin = async (loginEmail?: string, loginPhone?: string, directRedirectPath?: string) => {
     setStatusInfo(null);
@@ -149,14 +132,6 @@ export default function LoginPage() {
     executeLogin();
   };
 
-  const handleAdminQuickLogin = () => {
-    setEmail(adminAccount.email);
-    setPassword(adminAccount.password);
-    setPhone(adminAccount.phone);
-    setMethod('email');
-    executeLogin(adminAccount.email, adminAccount.phone, '/dashboard');
-  };
-
   return (
     <div className="min-h-screen flex bg-slate-50">
       {/* KIRI (40%): Branding Panel */}
@@ -202,46 +177,6 @@ export default function LoginPage() {
                 Daftar akun baru dengan kode verifikasi
               </Link>
             </p>
-          </div>
-
-          {/* Quick Access Akun Admin */}
-          <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200/80 space-y-3 shadow-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-emerald-900 flex items-center gap-1.5 uppercase tracking-wider">
-                <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                Akun Khusus Admin Aktif:
-              </span>
-              <span className="text-[10px] bg-emerald-600 text-white font-extrabold px-2 py-0.5 rounded-full">
-                SUPERADMIN
-              </span>
-            </div>
-
-            <div className="p-3 bg-white rounded-xl border border-emerald-100 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-800 truncate">Rifki Arifin (Admin)</p>
-                <p className="text-[11px] text-slate-500 font-mono">rifkiarifin@gmail.com</p>
-                <p className="text-[10px] text-emerald-700 font-semibold mt-0.5">Password: 123456789</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleAdminQuickLogin}
-                disabled={loading}
-                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shrink-0 transition-all shadow-sm hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
-              >
-                Masuk 1-Klik →
-              </button>
-            </div>
-
-            {/* Tombol Bantuan WhatsApp */}
-            <a
-              href="https://wa.me/6283851284143?text=Halo%20Admin%20TataDana,%20saya%20butuh%20bantuan%20login%20ke%20akun%20saya"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 w-full py-2 px-3 rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-800 text-[11px] font-bold border border-emerald-200 transition-colors"
-            >
-              <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Ada Kendala? Hubungi WhatsApp Admin (0838-5128-4143)</span>
-            </a>
           </div>
 
           {/* Status Alert Notification (Pending / Rejected / Error) */}
@@ -416,7 +351,7 @@ export default function LoginPage() {
 
             <button
               type="button"
-              onClick={() => executeLogin('rifkiarifin@gmail.com')}
+              onClick={() => notify('Fitur Google OAuth segera hadir. Silakan gunakan formulir Email & Password di atas.', 'info')}
               className="w-full py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-sm"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24">
@@ -439,6 +374,19 @@ export default function LoginPage() {
               </svg>
               <span>Google OAuth</span>
             </button>
+
+            {/* Link Bantuan WhatsApp */}
+            <div className="pt-3 text-center">
+              <a
+                href="https://wa.me/6283851284143?text=Halo%20Admin%20TataDana,%20saya%20butuh%20bantuan%20login%20ke%20akun%20saya"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-emerald-700 font-semibold transition-colors"
+              >
+                <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Ada kendala masuk? Hubungi WhatsApp Admin (0838-5128-4143)</span>
+              </a>
+            </div>
           </div>
         </div>
       </div>
