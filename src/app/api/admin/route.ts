@@ -26,8 +26,8 @@ export async function GET(req: NextRequest) {
   }
 
   if (action === 'view_user_transactions') {
-    const targetUserId = searchParams.get('targetUserId') || 'usr-budi-01';
-    const adminId = searchParams.get('adminId') || 'usr-admin-00';
+    const targetUserId = searchParams.get('targetUserId') || 'usr-admin-rifki';
+    const adminId = searchParams.get('adminId') || 'usr-admin-rifki';
     const reason = searchParams.get('reason') || 'Investigasi komplain transaksi user';
 
     // WAJIB: Audit Log setiap kali admin mengakses data transaksi user (Part 10)
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { action, adminId = 'usr-admin-00' } = body;
+    const { action, adminId = 'usr-admin-rifki' } = body;
 
     if (action === 'create_user') {
       const { email, phone_number, full_name, plan, role, status } = body;

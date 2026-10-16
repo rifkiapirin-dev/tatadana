@@ -196,7 +196,7 @@ export default function AdminDashboardPage() {
         body: JSON.stringify({
           action: 'create_user',
           ...createForm,
-          adminId: 'usr-admin-00',
+          adminId: currentUser?.id || 'usr-admin-rifki',
         }),
       });
 
@@ -232,7 +232,7 @@ export default function AdminDashboardPage() {
         body: JSON.stringify({
           action: 'approve_user',
           userId,
-          adminId: 'usr-admin-00',
+          adminId: currentUser?.id || 'usr-admin-rifki',
         }),
       });
       const data = await res.json();
@@ -259,7 +259,7 @@ export default function AdminDashboardPage() {
           action: 'reject_user',
           userId: rejectingUser.id,
           reason: rejectReason,
-          adminId: 'usr-admin-00',
+          adminId: currentUser?.id || 'usr-admin-rifki',
         }),
       });
       const data = await res.json();
@@ -287,7 +287,7 @@ export default function AdminDashboardPage() {
           action: 'update_user_role',
           userId,
           role,
-          adminId: 'usr-admin-00',
+          adminId: currentUser?.id || 'usr-admin-rifki',
         }),
       });
       const data = await res.json();
@@ -334,7 +334,7 @@ export default function AdminDashboardPage() {
         body: JSON.stringify({
           action: 'delete_user',
           userId,
-          adminId: 'usr-admin-00',
+          adminId: currentUser?.id || 'usr-admin-rifki',
         }),
       });
       const data = await res.json();
@@ -358,8 +358,9 @@ export default function AdminDashboardPage() {
   // View User Transactions with Audit Logging
   const handleViewUserTransactions = async (u: User) => {
     try {
+      const currentAdminId = currentUser?.id || 'usr-admin-rifki';
       const res = await fetch(
-        `/api/admin?action=view_user_transactions&targetUserId=${u.id}&adminId=usr-admin-00`
+        `/api/admin?action=view_user_transactions&targetUserId=${u.id}&adminId=${currentAdminId}`
       );
       const data = await res.json();
       if (data.ok) {
@@ -379,7 +380,7 @@ export default function AdminDashboardPage() {
       const res = await fetch('/api/payment/midtrans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, paymentId, adminId: 'usr-admin-00' }),
+        body: JSON.stringify({ action, paymentId, adminId: currentUser?.id || 'usr-admin-rifki' }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -1056,7 +1057,7 @@ export default function AdminDashboardPage() {
                       </td>
 
                       <td className="py-4 px-6 text-right space-x-2 whitespace-nowrap">
-                        {a.id !== 'usr-admin-00' ? (
+                        {a.id !== 'usr-admin-rifki' && a.id !== 'usr-admin-00' ? (
                           <>
                             {a.role === 'admin' ? (
                               <button

@@ -54,6 +54,7 @@ export default function LoginPage() {
         body: JSON.stringify({
           action: 'login',
           email: method === 'email' || loginEmail ? targetEmail : undefined,
+          password: method === 'email' ? password : undefined,
           phone: method === 'phone' && !loginEmail ? targetPhone : undefined,
         }),
       });

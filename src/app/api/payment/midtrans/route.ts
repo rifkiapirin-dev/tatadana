@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     // 2. Admin Manual Action (approve / reject)
     if (body.action === 'approve' || body.action === 'reject') {
       const paymentId = body.paymentId;
-      const adminId = body.adminId || 'usr-admin-00';
+      const adminId = body.adminId || 'usr-admin-rifki';
       const newStatus = body.action === 'approve' ? 'approved' : 'rejected';
 
       const updated = db.updatePaymentStatus(paymentId, newStatus, adminId);
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
       const orderId = `ORDER-TATA-${Date.now().toString().slice(-6)}`;
 
       const newPayment = db.createPayment({
-        user_id: userId || 'usr-budi-01',
+        user_id: userId || 'usr-admin-rifki',
         order_id: orderId,
         plan: plan || 'pro',
         amount: amount || 99000,

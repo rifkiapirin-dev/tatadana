@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import {
   getSupabaseTransactions,
   createSupabaseTransaction,
+  deleteSupabaseTransaction,
   isSupabaseConfigured,
 } from '@/lib/supabase';
 
@@ -88,6 +89,7 @@ export async function POST(req: NextRequest) {
         await createSupabaseTransaction({
           userIdOrEmail: uId,
           walletId,
+          targetWalletId,
           categoryId,
           type: type || 'expense',
           amount: Number(amount),
@@ -111,6 +113,16 @@ export async function DELETE(req: NextRequest) {
   const id = searchParams.get('id');
   if (!id) return NextResponse.json({ ok: false, error: 'ID required' }, { status: 400 });
 
-  const success = db.deleteTransaction(id);
+  let success = db.deleteTransaction(id);
+
+  if (isSupabaseConfigured()) {
+    try {
+      const sbDeleted = await deleteSupabaseTransaction(id);
+      if (sbDeleted) success = true;
+    } catch (e: any) {
+      console.warn('Failed to delete transaction from Supabase:', e.message);
+    }
+  }
+
   return NextResponse.json({ ok: success });
 }

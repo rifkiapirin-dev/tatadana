@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, ArrowDownRight, ArrowUpRight, ArrowLeftRight, Check, AlertCircle } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 
@@ -14,6 +14,15 @@ export default function ModalTransaction({ onClose }: { onClose: () => void }) {
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!walletId && wallets.length > 0) {
+      setWalletId(wallets[0].id);
+    }
+    if (!targetWalletId && wallets.length > 1) {
+      setTargetWalletId(wallets[1].id);
+    }
+  }, [wallets, walletId, targetWalletId]);
 
   const filteredCategories = categories.filter((c) => c.type === (tab === 'transfer' ? 'expense' : tab));
 

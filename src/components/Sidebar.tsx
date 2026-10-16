@@ -169,36 +169,6 @@ export default function Sidebar() {
             <LogOut className="w-4 h-4" />
           </Link>
         </div>
-
-        {/* Quick User Switcher for Testing */}
-        <div className="mt-3 flex gap-1 justify-center flex-wrap">
-          <button
-            onClick={() => {
-              switchUser('usr-admin-rifki');
-              if (isMobile) closeMobileMenu();
-            }}
-            className={`text-[10px] px-2 py-0.5 rounded-md border font-semibold transition-all ${
-              currentUser?.id === 'usr-admin-rifki'
-                ? 'bg-emerald-600 text-white border-emerald-600'
-                : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
-            }`}
-          >
-            👑 Rifki (Admin)
-          </button>
-          <button
-            onClick={() => {
-              switchUser('usr-budi-01');
-              if (isMobile) closeMobileMenu();
-            }}
-            className={`text-[10px] px-2 py-0.5 rounded-md border font-medium transition-all ${
-              currentUser?.id === 'usr-budi-01'
-                ? 'bg-emerald-600 text-white border-emerald-600'
-                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            Budi (User)
-          </button>
-        </div>
       </div>
     </div>
   );

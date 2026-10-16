@@ -496,6 +496,7 @@ class DatabaseEngine {
 
   createUser(
     userData: {
+      id?: string;
       email: string;
       phone_number: string;
       full_name: string;
@@ -503,12 +504,13 @@ class DatabaseEngine {
       role?: UserRole;
       status?: UserStatus;
       avatar_url?: string;
+      password?: string;
     },
     adminId?: string
   ): User {
     const data = this.read();
     const currentMonth = getCurrentMonthYear();
-    const newId = `usr-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+    const newId = userData.id || `usr-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
     const role: UserRole = userData.role || 'user';
     const status: UserStatus = userData.status || 'pending';
 
@@ -644,7 +646,7 @@ class DatabaseEngine {
     return newUser;
   }
 
-  approveUser(userId: string, adminId = 'usr-admin-00'): User | undefined {
+  approveUser(userId: string, adminId = 'usr-admin-rifki'): User | undefined {
     const data = this.read();
     const idx = data.users.findIndex((u) => u.id === userId);
     if (idx === -1) return undefined;
@@ -672,7 +674,7 @@ class DatabaseEngine {
 
   rejectUser(
     userId: string,
-    adminId = 'usr-admin-00',
+    adminId = 'usr-admin-rifki',
     reason = 'Data pendaftaran belum memenuhi syarat verifikasi atau kuota penuh'
   ): User | undefined {
     const data = this.read();
@@ -700,7 +702,7 @@ class DatabaseEngine {
     return data.users[idx];
   }
 
-  setUserRole(userId: string, role: UserRole, adminId = 'usr-admin-00'): User | undefined {
+  setUserRole(userId: string, role: UserRole, adminId = 'usr-admin-rifki'): User | undefined {
     const data = this.read();
     const idx = data.users.findIndex((u) => u.id === userId);
     if (idx === -1) return undefined;
@@ -726,7 +728,7 @@ class DatabaseEngine {
     return data.users[idx];
   }
 
-  deleteUser(userId: string, adminId = 'usr-admin-00'): boolean {
+  deleteUser(userId: string, adminId = 'usr-admin-rifki'): boolean {
     const data = this.read();
     const idx = data.users.findIndex((u) => u.id === userId);
     if (idx === -1) return false;

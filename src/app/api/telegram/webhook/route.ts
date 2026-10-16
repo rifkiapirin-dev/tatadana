@@ -17,6 +17,7 @@ import {
   getSupabaseWallets,
   getSupabaseTransactions,
   createSupabaseTransaction,
+  getSupabaseBudgets,
   isSupabaseConfigured,
 } from '@/lib/supabase';
 
@@ -313,7 +314,26 @@ export async function POST(req: NextRequest) {
 
         // Bersihkan antrean konfirmasi
         db.clearPendingConfirmation(user.id);
-        const updatedWallet = db.getWallet(chosenWallet.id);
+
+        let remainingBalance = Number(chosenWallet.balance) - Number(pendingConf.amount);
+        if (isSupabaseConfigured()) {
+          try {
+            const sbRes = await createSupabaseTransaction({
+              userIdOrEmail: user.id,
+              walletId: chosenWallet.id,
+              categoryId: pendingConf.category_id,
+              type: 'expense',
+              amount: Number(pendingConf.amount),
+              notes: pendingConf.notes,
+              source: pendingConf.source || 'telegram_text',
+            });
+            if (sbRes && sbRes.new_balance !== undefined) {
+              remainingBalance = Number(sbRes.new_balance);
+            }
+          } catch (sbErr: any) {
+            console.error('Error saving pending expense to Supabase:', sbErr.message);
+          }
+        }
 
         const budgets = db.getBudgets(user.id);
         const matchedBudget = budgets.find((b) => b.category_id === pendingConf.category_id);
@@ -324,7 +344,7 @@ export async function POST(req: NextRequest) {
         reply += `├ Kategori : ${pendingConf.category_name || 'Pengeluaran'}\n`;
         reply += `├ Dompet : 👛 ${chosenWallet.name}\n`;
         reply += `├ Catatan : ${pendingConf.notes}\n`;
-        reply += `└ Sisa Saldo : *${formatRupiah(updatedWallet?.balance || 0)}*\n\n`;
+        reply += `└ Sisa Saldo : *${formatRupiah(remainingBalance)}*\n\n`;
 
         if (matchedBudget) {
           const spent = matchedBudget.current_spent || 0;
@@ -355,7 +375,7 @@ export async function POST(req: NextRequest) {
           ok: true,
           status: 'expense_recorded',
           wallet: chosenWallet,
-          new_balance: updatedWallet?.balance,
+          new_balance: remainingBalance,
           reply,
         });
       } else {
@@ -391,12 +411,14 @@ export async function POST(req: NextRequest) {
     }
 
     // =========================================================================
-    // 5. PERINTAH BOT TELEGRAM (/saldo, /budget, /bantuan, dll)
+    // 5. PERINTAH BOT TELEGRAM (/saldo, /hari ini, /minggu ini, /bulan ini, /budget, /sheet, /bantuan)
     // =========================================================================
     if (text.startsWith('/')) {
-      const cmd = text.toLowerCase().split(' ')[0];
+      const cleanCmd = text.toLowerCase().trim().replace(/@\w+/g, '');
+      const baseCmd = cleanCmd.split(' ')[0];
 
-      if (cmd === '/saldo') {
+      // A. /saldo
+      if (baseCmd === '/saldo') {
         const totalSaldo = userWallets.reduce((s, w) => s + Number(w.balance), 0);
         let msg = `👛 *Saldo Dompet TataDana*\n\n`;
         userWallets.forEach((w, idx) => {
@@ -409,7 +431,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, command: '/saldo', reply: msg });
       }
 
-      if (cmd === '/hari' || cmd === '/hari_ini' || text.toLowerCase() === '/hari ini') {
+      // B. /hari ini
+      if (baseCmd === '/hari' || baseCmd === '/hari_ini' || cleanCmd === '/hari ini') {
         const todayIso = new Date().toISOString().split('T')[0];
         let txs = db.getTransactions(user.id, { startDate: todayIso, endDate: todayIso });
         if (isSupabaseConfigured()) {
@@ -445,37 +468,151 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, reply: msg });
       }
 
-      if (cmd === '/budget') {
-        const budgets = db.getBudgets(user.id);
-        let msg = `🎯 *Status Budget Bulan Ini*\n\n`;
-        budgets.forEach((b) => {
-          const spent = b.current_spent || 0;
-          const limit = b.monthly_limit;
-          const pct = Math.round((spent / limit) * 100);
-          const remaining = Math.max(0, limit - spent);
-          const bar = generateProgressBar(pct, 10);
-          msg += `${b.category?.name || 'Kategori'}:\n${bar} ${pct}% — Sisa ${formatRupiah(
-            remaining
-          )}\n\n`;
-        });
+      // C. /minggu ini (7 hari terakhir)
+      if (baseCmd === '/minggu' || baseCmd === '/minggu_ini' || cleanCmd === '/minggu ini') {
+        const now = new Date();
+        const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const sevenDaysAgoIso = sevenDaysAgo.toISOString().split('T')[0];
+
+        let txs = db.getTransactions(user.id, { startDate: sevenDaysAgoIso });
+        if (isSupabaseConfigured()) {
+          try {
+            const sbTxs = await getSupabaseTransactions(user.id, 100);
+            if (sbTxs && sbTxs.length > 0) {
+              txs = sbTxs.filter((t: any) => (t.transaction_date || '') >= sevenDaysAgoIso) as any;
+            }
+          } catch (e) {}
+        }
+
+        const totalOut = txs.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+        const totalIn = txs.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+        const netFlow = totalIn - totalOut;
+
+        let msg = `📊 *Rekap 7 Hari Terakhir*\n`;
+        msg += `Periode: ${formatDateWib(sevenDaysAgo)} s/d ${formatDateWib(now)}\n\n`;
+        msg += `🔻 Total Pengeluaran : *${formatRupiah(totalOut)}*\n`;
+        msg += `🔺 Total Pemasukan   : *${formatRupiah(totalIn)}*\n`;
+        msg += `⚖️ Arus Kas Bersih    : *${formatRupiah(netFlow)}*\n\n`;
+
+        if (txs.length === 0) {
+          msg += `Belum ada transaksi dalam 7 hari terakhir.`;
+        } else {
+          msg += `*5 Transaksi Terbaru:*\n`;
+          txs.slice(0, 5).forEach((t) => {
+            const icon = t.type === 'expense' ? '💸' : t.type === 'income' ? '💰' : '🔄';
+            msg += `${icon} *${formatRupiah(t.amount)}* — ${t.notes || t.category?.name || 'Transaksi'}\n`;
+          });
+        }
+
         await sendTelegramMessage(botToken, chatId, msg);
         return NextResponse.json({ ok: true, reply: msg });
       }
 
-      if (cmd === '/bantuan' || cmd === '/help') {
+      // D. /bulan ini (rekap bulan berjalan dengan breakdown kategori)
+      if (baseCmd === '/bulan' || baseCmd === '/bulan_ini' || cleanCmd === '/bulan ini') {
+        const now = new Date();
+        const currentMonthYear = now.toISOString().slice(0, 7);
+
+        let txs = db.getTransactions(user.id, { startDate: `${currentMonthYear}-01` });
+        if (isSupabaseConfigured()) {
+          try {
+            const sbTxs = await getSupabaseTransactions(user.id, 200);
+            if (sbTxs && sbTxs.length > 0) {
+              txs = sbTxs.filter((t: any) => (t.transaction_date || '').startsWith(currentMonthYear)) as any;
+            }
+          } catch (e) {}
+        }
+
+        const totalOut = txs.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+        const totalIn = txs.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+
+        const catMap: Record<string, number> = {};
+        txs.filter((t) => t.type === 'expense').forEach((t) => {
+          const catName = t.category?.name || 'Lain-lain';
+          catMap[catName] = (catMap[catName] || 0) + Number(t.amount);
+        });
+
+        let msg = `📅 *Rekap Bulan Ini (${currentMonthYear})*\n\n`;
+        msg += `🔻 Total Pengeluaran : *${formatRupiah(totalOut)}*\n`;
+        msg += `🔺 Total Pemasukan   : *${formatRupiah(totalIn)}*\n`;
+        msg += `⚖️ Sisa Surplus      : *${formatRupiah(totalIn - totalOut)}*\n\n`;
+
+        if (Object.keys(catMap).length > 0) {
+          msg += `*Pengeluaran per Kategori:*\n`;
+          Object.entries(catMap)
+            .sort((a, b) => b[1] - a[1])
+            .forEach(([cat, amt]) => {
+              const pct = totalOut > 0 ? Math.round((amt / totalOut) * 100) : 0;
+              msg += `• ${cat}: *${formatRupiah(amt)}* (${pct}%)\n`;
+            });
+        }
+
+        await sendTelegramMessage(botToken, chatId, msg);
+        return NextResponse.json({ ok: true, reply: msg });
+      }
+
+      // E. /budget
+      if (baseCmd === '/budget') {
+        let budgets = db.getBudgets(user.id);
+        if (isSupabaseConfigured()) {
+          try {
+            const sbB = await getSupabaseBudgets(user.id);
+            if (sbB && sbB.length > 0) budgets = sbB as any;
+          } catch (e) {}
+        }
+
+        let msg = `🎯 *Status Budget Bulan Ini*\n\n`;
+        if (budgets.length === 0) {
+          msg += `Belum ada target budget yang diatur bulan ini. Buka menu Budget di aplikasi web untuk menentukan batas pengeluaranmu!`;
+        } else {
+          budgets.forEach((b: any) => {
+            const spent = b.current_spent || 0;
+            const limit = b.monthly_limit;
+            const pct = limit > 0 ? Math.round((spent / limit) * 100) : 0;
+            const remaining = Math.max(0, limit - spent);
+            const bar = generateProgressBar(pct, 10);
+            msg += `${b.category?.name || 'Kategori'}:\n[${bar}] ${pct}% — Sisa ${formatRupiah(
+              remaining
+            )}\n\n`;
+          });
+        }
+        await sendTelegramMessage(botToken, chatId, msg);
+        return NextResponse.json({ ok: true, reply: msg });
+      }
+
+      // F. /sheet
+      if (baseCmd === '/sheet' || baseCmd === '/laporan') {
+        const msg = `📊 *Laporan Keuangan & Dashboard TataDana*\n\nData transaksi dan ringkasan keuanganmu dapat diakses secara live:\n\n👉 *Dashboard & Download Laporan:*\nhttps://tatadana-kg54.vercel.app/dashboard/reports\n\nKamu dapat mengekspor rekap keuangan lengkap ke format *Excel (.xlsx)* maupun *PDF resmi* kapan saja!`;
+        await sendTelegramMessage(botToken, chatId, msg);
+        return NextResponse.json({ ok: true, reply: msg });
+      }
+
+      // G. /batal
+      if (baseCmd === '/batal' || baseCmd === '/cancel') {
+        db.clearPendingConfirmation(user.id);
+        const cancelReply = `✅ *Antrean Dibatalkan*\n\nSemua konfirmasi transaksi yang sedang berlangsung telah dibersihkan. Saldo Anda aman dan tidak berubah.`;
+        await sendTelegramMessage(botToken, chatId, cancelReply);
+        return NextResponse.json({ ok: true, reply: cancelReply });
+      }
+
+      // H. /bantuan & /help
+      if (baseCmd === '/bantuan' || baseCmd === '/help') {
         const msg = `💡 *Panduan Perintah TataDana*\n\n*Format Chat Langsung:*
-• _"beli bakso 15rb"_ → Bot konfirmasi pilihan dompet (BCA, Mandiri, GoPay, Tunai)
-• _"bayar listrik 100rb"_ → Bot konfirmasi pilihan dompet
-• _"tambah saldo gopay 100rb"_ → Top up saldo e-wallet
+• _"beli bakso 15rb"_ → Catat pengeluaran langsung
+• _"bayar listrik 100rb gopay"_ → Catat pengeluaran via dompet tertentu
+• _"tambah saldo gopay 100rb"_ → Top up / isi saldo dompet
 • _"gajian 5jt"_ → Catat pemasukan gaji
 • Kirim Foto Struk (Paket Pro) 📷
 • Kirim Voice Note 🎙️
 
-*Perintah Cepat:*
+*Perintah Bot:*
 • /saldo — Cek saldo semua dompet
 • /hari ini — Rekap transaksi hari ini
+• /minggu ini — Rekap 7 hari terakhir
+• /bulan ini — Rekap bulanan & kategori
 • /budget — Pantau batas anggaran
-• /batal — Batalkan transaksi yang sedang dikonfirmasi`;
+• /sheet — Link laporan & ekspor Excel/PDF
+• /batal — Batalkan transaksi yang sedang berjalan`;
         await sendTelegramMessage(botToken, chatId, msg);
         return NextResponse.json({ ok: true, reply: msg });
       }
@@ -582,20 +719,39 @@ export async function POST(req: NextRequest) {
           is_ocr: false,
           transaction_date: new Date().toISOString(),
         });
-        const updatedWallet = db.getWallet(targetWallet.id);
+
+        let newBalance = Number(targetWallet.balance) + Number(parsed.nominal);
+        if (isSupabaseConfigured()) {
+          try {
+            const sbRes = await createSupabaseTransaction({
+              userIdOrEmail: user.id,
+              walletId: targetWallet.id,
+              categoryId: matchedCat.id,
+              type: 'income',
+              amount: Number(parsed.nominal),
+              notes: parsed.catatan,
+              source: 'telegram_voice',
+            });
+            if (sbRes && sbRes.new_balance !== undefined) {
+              newBalance = Number(sbRes.new_balance);
+            }
+          } catch (sbErr: any) {
+            console.error('Error saving voice income to Supabase:', sbErr.message);
+          }
+        }
 
         let reply = `🎙️ Transkrip: "${transcript}"\n\n`;
         reply += `💰 *Pemasukan Tercatat!*\n`;
         reply += `├ Nominal : *${formatRupiah(parsed.nominal)}*\n`;
         reply += `├ Dompet : 👛 ${targetWallet.name}\n`;
-        reply += `└ Saldo baru : *${formatRupiah(updatedWallet?.balance || 0)}* 📈`;
+        reply += `└ Saldo baru : *${formatRupiah(newBalance)}* 📈`;
 
         await sendTelegramMessage(botToken, chatId, reply);
         return NextResponse.json({
           ok: true,
           status: 'voice_income_recorded',
           wallet: targetWallet,
-          new_balance: updatedWallet?.balance,
+          new_balance: newBalance,
           reply,
         });
       }

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { formatRupiah, formatDateWib } from '@/lib/utils';
+import { getSupabaseTransactions, isSupabaseConfigured } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
   try {
     const { userId, fileType, startDate, endDate, categoryId, walletId } = await req.json();
-    const uId = userId || 'usr-budi-01';
+    const uId = userId || 'usr-admin-rifki';
     const user = db.getUser(uId);
 
     if (!user) {
@@ -23,12 +24,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const txs = db.getTransactions(uId, {
+    let txs = db.getTransactions(uId, {
       startDate,
       endDate,
       categoryId,
       walletId,
     });
+
+    if (isSupabaseConfigured()) {
+      try {
+        const sbTxs = await getSupabaseTransactions(uId, 200);
+        if (sbTxs && sbTxs.length > 0) {
+          let filtered = sbTxs;
+          if (walletId) filtered = filtered.filter((t: any) => t.wallet_id === walletId);
+          if (categoryId) filtered = filtered.filter((t: any) => t.category_id === categoryId);
+          if (startDate) filtered = filtered.filter((t: any) => (t.transaction_date || '') >= startDate);
+          if (endDate) filtered = filtered.filter((t: any) => (t.transaction_date || '') <= endDate);
+          txs = filtered as any;
+        }
+      } catch (e) {}
+    }
 
     const periodStr = startDate && endDate ? `${startDate} s/d ${endDate}` : 'Semua Periode';
     const ext = fileType === 'pdf' ? 'pdf' : 'xlsx';

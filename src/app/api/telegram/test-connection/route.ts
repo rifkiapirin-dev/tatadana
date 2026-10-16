@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     }
 
     const cleanToken = token.trim();
-    const effectiveUserId = userId || 'usr-budi-01';
+    const effectiveUserId = userId || 'usr-admin-rifki';
 
     // 1. Cek keunikan token di database (hanya jika bukan platform bot token)
     const isPlatformToken = cleanToken === (process.env.TELEGRAM_BOT_TOKEN || '').trim();

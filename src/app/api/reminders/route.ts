@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const userId = searchParams.get('userId') || 'usr-budi-01';
+  const userId = searchParams.get('userId') || 'usr-admin-rifki';
   const reminder = db.getReminder(userId);
   return NextResponse.json({ ok: true, reminder });
 }
@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const { userId, is_active, frequency, time_1, time_2 } = await req.json();
-    const uId = userId || 'usr-budi-01';
+    const uId = userId || 'usr-admin-rifki';
 
     // Enforcement: maksimal 2x sehari sesuai kebijakan produk Part 3 & 4.8
     const safeFreq = frequency === 2 ? 2 : 1;

@@ -45,7 +45,7 @@ export default function ReportsPage() {
   // Fetch export history
   const fetchExportHistory = async () => {
     try {
-      const res = await fetch(`/api/reports/history?userId=${currentUser?.id || 'usr-budi-01'}`);
+      const res = await fetch(`/api/reports/history?userId=${currentUser?.id || 'usr-admin-rifki'}`);
       const data = await res.json();
       if (data.ok) {
         setExportHistory(data.history || []);

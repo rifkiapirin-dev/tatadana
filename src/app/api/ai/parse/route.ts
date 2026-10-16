@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Text required' }, { status: 400 });
     }
 
-    const uId = userId || 'usr-budi-01';
+    const uId = userId || 'usr-admin-rifki';
     const categories = db.getCategories(uId);
     const parsed = await parseTransactionWithAI(text, categories, uId);
 

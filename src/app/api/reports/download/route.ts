@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { formatRupiah, formatDateWib } from '@/lib/utils';
+import { getSupabaseTransactions, isSupabaseConfigured } from '@/lib/supabase';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const id = searchParams.get('id');
   let format = searchParams.get('format') || '';
-  let uId = searchParams.get('userId') || 'usr-budi-01';
+  let uId = searchParams.get('userId') || 'usr-admin-rifki';
   let fileName = `Laporan-TataDana-${Date.now()}`;
 
   if (id) {
@@ -35,7 +36,16 @@ export async function GET(req: NextRequest) {
   if (!format) format = 'csv';
 
   const user = db.getUser(uId);
-  const txs = db.getTransactions(uId);
+  let txs = db.getTransactions(uId);
+
+  if (isSupabaseConfigured()) {
+    try {
+      const sbTxs = await getSupabaseTransactions(uId, 200);
+      if (sbTxs && sbTxs.length > 0) {
+        txs = sbTxs as any;
+      }
+    } catch (e) {}
+  }
 
   if (format === 'csv' || format === 'xlsx') {
     let csv = 'ID Transaksi,Tanggal,Jenis,Kategori,Dompet,Nominal,Catatan,Sumber\n';

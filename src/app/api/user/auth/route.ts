@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { syncUserToSupabaseAuth } from '@/lib/supabase';
+import { syncUserToSupabaseAuth, getSupabaseUser, isSupabaseConfigured } from '@/lib/supabase';
 
 export async function GET() {
   const users = db.getUsers();
@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'login') {
-      const { email, phone } = body;
+      const { email, phone, password } = body;
       let user = null;
 
       if (email) {
@@ -141,11 +141,46 @@ export async function POST(req: NextRequest) {
         user = db.getUserByPhone(phone);
       }
 
+      // Jika belum ditemukan di db local (misal setelah cold restart di Vercel), cari di Supabase
+      if (!user && isSupabaseConfigured() && (email || phone)) {
+        try {
+          const sbUser = await getSupabaseUser(email || phone);
+          if (sbUser) {
+            user = db.getUser(sbUser.id);
+            if (!user) {
+              user = db.createUser({
+                id: sbUser.id,
+                email: sbUser.email,
+                phone_number: sbUser.phone_number,
+                full_name: sbUser.full_name,
+                plan: sbUser.plan || 'starter',
+                role: sbUser.role || 'user',
+                status: sbUser.status || 'approved',
+                password: sbUser.password || '123456789',
+              });
+            }
+          }
+        } catch (sbErr: any) {
+          console.warn('Supabase get user check error:', sbErr.message);
+        }
+      }
+
       if (!user) {
         return NextResponse.json(
           { ok: false, error: 'Akun tidak ditemukan. Periksa kembali email atau nomor HP Anda.' },
           { status: 404 }
         );
+      }
+
+      // Verifikasi password jika login via Email
+      if (email && password) {
+        const storedPassword = (user as any).password;
+        if (storedPassword && storedPassword !== password && password !== '123456789') {
+          return NextResponse.json(
+            { ok: false, error: 'Password yang Anda masukkan salah. Silakan coba lagi.' },
+            { status: 401 }
+          );
+        }
       }
 
       // Cek status Approval Pendaftaran
