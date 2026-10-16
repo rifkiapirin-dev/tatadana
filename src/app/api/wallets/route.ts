@@ -1,11 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getSupabaseWallets, isSupabaseConfigured } from '@/lib/supabase';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const userId = searchParams.get('userId') || 'usr-budi-01';
+  const userId = searchParams.get('userId') || 'usr-admin-rifki';
+
+  if (isSupabaseConfigured()) {
+    try {
+      const sbWallets = await getSupabaseWallets(userId);
+      if (sbWallets && sbWallets.length > 0) {
+        return NextResponse.json({ ok: true, wallets: sbWallets, source: 'supabase' });
+      }
+    } catch (err: any) {
+      console.warn('Fallback to local db wallets:', err.message);
+    }
+  }
+
   const wallets = db.getWallets(userId);
-  return NextResponse.json({ ok: true, wallets });
+  return NextResponse.json({ ok: true, wallets, source: 'local' });
 }
 
 export async function POST(req: NextRequest) {

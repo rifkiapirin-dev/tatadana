@@ -166,3 +166,201 @@ export async function deleteUserInSupabase(email: string) {
     console.error('[Supabase Delete User Error]:', err.message);
   }
 }
+
+/**
+ * Resolves an identifier (UUID, 'usr-admin-rifki', or email) to a Supabase user UUID
+ */
+export async function resolveSupabaseUserId(userIdOrEmail?: string): Promise<string | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (userIdOrEmail && uuidRegex.test(userIdOrEmail)) {
+    return userIdOrEmail;
+  }
+
+  try {
+    if (!userIdOrEmail || userIdOrEmail === 'usr-admin-rifki' || userIdOrEmail === 'rifkiarifin@gmail.com') {
+      const { data } = await client.from('users').select('id').eq('email', 'rifkiarifin@gmail.com').maybeSingle();
+      if (data?.id) return data.id;
+    }
+
+    if (userIdOrEmail && userIdOrEmail.includes('@')) {
+      const { data } = await client.from('users').select('id').eq('email', userIdOrEmail).maybeSingle();
+      if (data?.id) return data.id;
+    }
+
+    const { data: superadmin } = await client.from('users').select('id').eq('role', 'superadmin').maybeSingle();
+    if (superadmin?.id) return superadmin.id;
+
+    const { data: firstUser } = await client.from('users').select('id').limit(1).maybeSingle();
+    return firstUser?.id || null;
+  } catch (err: any) {
+    console.error('[Supabase Resolve User Error]:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Ambil daftar dompet pengguna dari Supabase
+ */
+export async function getSupabaseWallets(userIdOrEmail?: string) {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const userId = await resolveSupabaseUserId(userIdOrEmail);
+    if (!userId) return null;
+
+    const { data: wallets, error } = await client
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .order('is_default', { ascending: false });
+
+    if (error) {
+      console.error('[Supabase Wallets Error]:', error.message);
+      return null;
+    }
+
+    return wallets || [];
+  } catch (err: any) {
+    console.error('[Supabase Wallets Catch]:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Update saldo dompet di Supabase (+ untuk income/top-up, - untuk expense)
+ */
+export async function updateSupabaseWalletBalance(walletId: string, amountChange: number) {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { data: currentWallet, error: fetchErr } = await client
+      .from('wallets')
+      .select('*')
+      .eq('id', walletId)
+      .single();
+
+    if (fetchErr || !currentWallet) {
+      console.error('[Supabase Wallet Fetch Error]:', fetchErr?.message);
+      return null;
+    }
+
+    const currentBalance = Number(currentWallet.balance) || 0;
+    const newBalance = currentBalance + amountChange;
+
+    const { data: updatedWallet, error: updateErr } = await client
+      .from('wallets')
+      .update({
+        balance: newBalance,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', walletId)
+      .select()
+      .single();
+
+    if (updateErr) {
+      console.error('[Supabase Wallet Update Error]:', updateErr.message);
+      return null;
+    }
+
+    return updatedWallet;
+  } catch (err: any) {
+    console.error('[Supabase Wallet Balance Catch]:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Catat transaksi langsung ke Supabase dan potong/tambah saldo dompet
+ */
+export async function createSupabaseTransaction(params: {
+  userIdOrEmail?: string;
+  walletId: string;
+  categoryId?: string;
+  type: 'expense' | 'income' | 'transfer';
+  amount: number;
+  notes?: string;
+  source?: string;
+  transactionDate?: string;
+}) {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const userId = await resolveSupabaseUserId(params.userIdOrEmail);
+    if (!userId) return null;
+
+    // 1. Insert ke tabel transactions
+    const { data: newTx, error: txErr } = await client
+      .from('transactions')
+      .insert({
+        user_id: userId,
+        wallet_id: params.walletId,
+        category_id: params.categoryId || null,
+        type: params.type,
+        amount: params.amount,
+        notes: params.notes || '',
+        source: params.source || 'telegram_text',
+        transaction_date: params.transactionDate || new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (txErr) {
+      console.error('[Supabase Insert Tx Error]:', txErr.message);
+      return null;
+    }
+
+    // 2. Hitung perubahan saldo dompet
+    const delta = params.type === 'expense' ? -Number(params.amount) : Number(params.amount);
+    const updatedWallet = await updateSupabaseWalletBalance(params.walletId, delta);
+
+    return {
+      transaction: newTx,
+      wallet: updatedWallet,
+      new_balance: updatedWallet?.balance,
+    };
+  } catch (err: any) {
+    console.error('[Supabase Create Tx Catch]:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Ambil daftar transaksi pengguna dari Supabase
+ */
+export async function getSupabaseTransactions(userIdOrEmail?: string, limit = 50) {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const userId = await resolveSupabaseUserId(userIdOrEmail);
+    if (!userId) return null;
+
+    const { data, error } = await client
+      .from('transactions')
+      .select('*, wallets(*), categories(*)')
+      .eq('user_id', userId)
+      .order('transaction_date', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('[Supabase Get Tx Error]:', error.message);
+      return null;
+    }
+
+    return (data || []).map((t: any) => ({
+      ...t,
+      wallet: t.wallets,
+      category: t.categories,
+    }));
+  } catch (err: any) {
+    console.error('[Supabase Get Tx Catch]:', err.message);
+    return null;
+  }
+}
+

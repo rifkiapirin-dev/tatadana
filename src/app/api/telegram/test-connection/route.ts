@@ -108,7 +108,10 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Set Webhook: POST https://api.telegram.org/bot<TOKEN>/setWebhook
-    const webhookBase = process.env.WEBHOOK_BASE_URL || 'http://localhost:3000';
+    const reqHost = req.headers.get('x-forwarded-host') || req.headers.get('host');
+    const reqProto = req.headers.get('x-forwarded-proto') || 'https';
+    const detectedBase = reqHost ? `${reqProto}://${reqHost}` : 'https://tatadana-kg54.vercel.app';
+    const webhookBase = process.env.WEBHOOK_BASE_URL || (reqHost && !reqHost.includes('localhost') ? detectedBase : 'https://tatadana-kg54.vercel.app');
     const webhookUrl = `${webhookBase}/api/telegram/webhook`;
 
     let webhookSet = false;
@@ -121,7 +124,7 @@ export async function POST(req: NextRequest) {
       const setHookJson = await setHookRes.json();
       webhookSet = setHookJson.ok === true;
     } catch (whErr) {
-      console.warn('Webhook register warning (likely running in local offline):', whErr);
+      console.warn('Webhook register warning:', whErr);
     }
 
     // 5. Simpan status koneksi ke database

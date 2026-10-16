@@ -13,6 +13,12 @@ import {
   evaluateFinancialAdvisor,
 } from '@/lib/ai-engine';
 import { Wallet, PendingTransactionConfirmation } from '@/types';
+import {
+  getSupabaseWallets,
+  getSupabaseTransactions,
+  createSupabaseTransaction,
+  isSupabaseConfigured,
+} from '@/lib/supabase';
 
 /**
  * Helper pengirim pesan balasan ke Telegram API
@@ -244,9 +250,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, status: 'limit_reached' });
     }
 
-    const userWallets = db.getWallets(user.id);
+    let userWallets = db.getWallets(user.id);
+    if (isSupabaseConfigured()) {
+      try {
+        const sbWallets = await getSupabaseWallets(user.id);
+        if (sbWallets && sbWallets.length > 0) {
+          userWallets = sbWallets as any;
+        }
+      } catch (e) {
+        console.warn('Failed to load supabase wallets for webhook:', e);
+      }
+    }
     const userCategories = db.getCategories(user.id);
-    const defaultWallet = db.getDefaultWallet(user.id) || userWallets[0];
+    const defaultWallet = userWallets.find((w: any) => w.is_default) || userWallets[0];
 
     // =========================================================================
     // 4. PENANGANAN KONFIRMASI DOMPET YANG SEDANG BERJALAN (PENDING CONFIRMATION)
@@ -395,7 +411,15 @@ export async function POST(req: NextRequest) {
 
       if (cmd === '/hari' || cmd === '/hari_ini' || text.toLowerCase() === '/hari ini') {
         const todayIso = new Date().toISOString().split('T')[0];
-        const txs = db.getTransactions(user.id, { startDate: todayIso, endDate: todayIso });
+        let txs = db.getTransactions(user.id, { startDate: todayIso, endDate: todayIso });
+        if (isSupabaseConfigured()) {
+          try {
+            const sbTxs = await getSupabaseTransactions(user.id);
+            if (sbTxs && sbTxs.length > 0) {
+              txs = sbTxs.filter((t: any) => (t.transaction_date || '').startsWith(todayIso)) as any;
+            }
+          } catch (e) {}
+        }
         const totalOut = txs
           .filter((t) => t.type === 'expense')
           .reduce((s, t) => s + Number(t.amount), 0);
@@ -648,77 +672,104 @@ export async function POST(req: NextRequest) {
 
       // =======================================================================
       // A. JIKA TRANSAKSI PENGELUARAN / PEMBAYARAN:
-      // WAJIB KONFIRMASI DOMPET: "Mau bayar melalui rekening atau e-wallet yang mana?"
+      // Langsung potong saldo dari dompet yang sesuai (atau dompet utama)
       // =======================================================================
       if (parsed.jenis === 'expense') {
-        const pendingData: PendingTransactionConfirmation = {
-          id: `pend-tx-${Date.now()}`,
-          user_id: user.id,
-          telegram_chat_id: chatId,
+        let chosenWallet = matchWalletFromInput(userWallets, text);
+        if (!chosenWallet && parsed.target_wallet) {
+          chosenWallet = matchWalletFromInput(userWallets, parsed.target_wallet);
+        }
+        if (!chosenWallet) {
+          chosenWallet = defaultWallet || userWallets[0];
+        }
+
+        // 1. Simpan ke local db cache
+        const newTx = db.createTransaction(user.id, {
+          wallet_id: chosenWallet.id,
+          category_id: matchedCat.id,
           type: 'expense',
           amount: parsed.nominal,
-          category_id: matchedCat.id,
-          category_name: matchedCat.name,
           notes: parsed.catatan,
           source: 'telegram_text',
-          created_at: new Date().toISOString(),
-        };
-
-        db.setPendingConfirmation(user.id, pendingData);
-
-        let reply = `💳 *Konfirmasi Rekening / E-Wallet*\n\n`;
-        reply += `Mau bayar melalui rekening atau e-wallet yang mana?\n`;
-        reply += `├ Transaksi : *${parsed.catatan}*\n`;
-        reply += `├ Nominal : *${formatRupiah(parsed.nominal)}*\n`;
-        reply += `└ Kategori : ${matchedCat.name}\n\n`;
-        reply += `*Pilihan dompet Anda:*\n`;
-        userWallets.forEach((w, idx) => {
-          reply += `[${idx + 1}] ${w.name} (${formatRupiah(w.balance)})\n`;
+          is_ocr: false,
+          transaction_date: new Date().toISOString(),
         });
-        reply += `\nSilakan balas dengan angka *[1-${userWallets.length}]* atau ketik nama dompet (contoh: *BCA*, *Mandiri*, *GoPay*, *Cash*).\nKetik *batal* untuk membatalkan.`;
 
-        const inlineKeyboard = {
-          inline_keyboard: [
-            userWallets.map((w, idx) => ({
-              text: `[${idx + 1}] ${w.name}`,
-              callback_data: `wallet_${w.id}`,
-            })),
-            [{ text: '✕ Batal', callback_data: 'cancel_tx' }],
-          ],
-        };
+        // 2. Simpan dan update saldo di Supabase Cloud DB
+        let remainingBalance = Number(chosenWallet.balance) - Number(parsed.nominal);
+        if (isSupabaseConfigured()) {
+          try {
+            const sbRes = await createSupabaseTransaction({
+              userIdOrEmail: user.id,
+              walletId: chosenWallet.id,
+              categoryId: matchedCat.id,
+              type: 'expense',
+              amount: Number(parsed.nominal),
+              notes: parsed.catatan,
+              source: 'telegram_text',
+            });
+            if (sbRes && sbRes.new_balance !== undefined) {
+              remainingBalance = Number(sbRes.new_balance);
+            }
+          } catch (sbErr: any) {
+            console.error('Error saving expense to Supabase:', sbErr.message);
+          }
+        }
 
-        await sendTelegramMessage(botToken, chatId, reply, inlineKeyboard);
+        const budgets = db.getBudgets(user.id);
+        const matchedBudget = budgets.find((b) => b.category_id === matchedCat.id);
+
+        let reply = `📅 ${formatDateWib(new Date())} — ${formatTimeWib(new Date())}\n`;
+        reply += `💸 *Pengeluaran tercatat!*\n`;
+        reply += `├ Nominal : *${formatRupiah(parsed.nominal)}*\n`;
+        reply += `├ Kategori : ${matchedCat.name}\n`;
+        reply += `├ Dompet : 👛 ${chosenWallet.name}\n`;
+        reply += `├ Catatan : ${parsed.catatan}\n`;
+        reply += `└ Sisa Saldo : *${formatRupiah(remainingBalance)}*\n\n`;
+
+        if (matchedBudget) {
+          const spent = (matchedBudget.current_spent || 0) + Number(parsed.nominal);
+          const pct = Math.round((spent / matchedBudget.monthly_limit) * 100);
+          const rem = Math.max(0, matchedBudget.monthly_limit - spent);
+          const bar = generateProgressBar(pct, 10);
+          reply += `📊 *Budget ${matchedCat.name} bulan ini:*\n`;
+          reply += `[${bar}] ${pct}% — sisa ${formatRupiah(rem)}\n`;
+          if (pct >= 100) {
+            reply += `⚠️ *Perhatian:* Budget untuk kategori ini sudah melampaui batas!\n`;
+          } else if (pct >= 80) {
+            reply += `⚠️ *Hati-hati:* Budget hampir habis! Yuk lebih hemat 💪\n`;
+          }
+        }
+
+        await sendTelegramMessage(botToken, chatId, reply);
+
+        // Evaluasi saran finansial proaktif AI
+        const advisor = evaluateFinancialAdvisor(user.id, newTx);
+        if (advisor.triggered) {
+          await sendTelegramMessage(botToken, chatId, advisor.message);
+        }
+
         return NextResponse.json({
           ok: true,
-          status: 'awaiting_wallet_confirmation',
+          status: 'expense_recorded',
+          wallet: chosenWallet,
+          new_balance: remainingBalance,
           reply,
-          pending_confirmation: pendingData,
-          wallets: userWallets,
         });
       }
 
       // =======================================================================
       // B. JIKA TRANSAKSI PEMASUKAN / TOP UP SALDO:
-      // Saldo dompet bertambah dan nota konfirmasi ditampilkan
+      // Saldo dompet bertambah langsung di Supabase dan nota dikirim
       // =======================================================================
       if (parsed.jenis === 'income') {
-        let chosenWallet = defaultWallet;
+        let chosenWallet = defaultWallet || userWallets[0];
         if (parsed.target_wallet) {
-          const matchedW = db.findWalletByNameOrAlias(user.id, parsed.target_wallet);
-          if (matchedW) {
-            chosenWallet = matchedW;
-          } else {
-            const isEwallet = ['GoPay', 'OVO', 'DANA', 'ShopeePay'].includes(parsed.target_wallet);
-            const newW = db.createWallet(user.id, {
-              name: parsed.target_wallet,
-              type: isEwallet ? 'ewallet' : 'bank',
-              balance: 0,
-              is_default: false,
-              icon: isEwallet ? 'smartphone' : 'credit-card',
-              color: '#10B981',
-            });
-            chosenWallet = newW;
-          }
+          const matchedW = matchWalletFromInput(userWallets, parsed.target_wallet);
+          if (matchedW) chosenWallet = matchedW;
+        } else {
+          const matchedFromText = matchWalletFromInput(userWallets, text);
+          if (matchedFromText) chosenWallet = matchedFromText;
         }
 
         const isTopUp =
@@ -730,6 +781,7 @@ export async function POST(req: NextRequest) {
           parsed.catatan.toLowerCase().includes('nabung') ||
           parsed.catatan.toLowerCase().includes('setor');
 
+        // 1. Simpan ke local db cache
         db.createTransaction(user.id, {
           wallet_id: chosenWallet.id,
           category_id: matchedCat.id,
@@ -741,7 +793,26 @@ export async function POST(req: NextRequest) {
           transaction_date: new Date().toISOString(),
         });
 
-        const updatedWallet = db.getWallet(chosenWallet.id);
+        // 2. Simpan dan update saldo di Supabase Cloud DB
+        let newBalance = Number(chosenWallet.balance) + Number(parsed.nominal);
+        if (isSupabaseConfigured()) {
+          try {
+            const sbRes = await createSupabaseTransaction({
+              userIdOrEmail: user.id,
+              walletId: chosenWallet.id,
+              categoryId: matchedCat.id,
+              type: 'income',
+              amount: Number(parsed.nominal),
+              notes: parsed.catatan,
+              source: 'telegram_text',
+            });
+            if (sbRes && sbRes.new_balance !== undefined) {
+              newBalance = Number(sbRes.new_balance);
+            }
+          } catch (sbErr: any) {
+            console.error('Error saving income to Supabase:', sbErr.message);
+          }
+        }
 
         let reply = `📅 ${formatDateWib(new Date())} — ${formatTimeWib(new Date())}\n`;
         if (isTopUp) {
@@ -750,14 +821,14 @@ export async function POST(req: NextRequest) {
           reply += `├ Dompet : 👛 ${chosenWallet.name}\n`;
           reply += `├ Kategori : 📥 ${matchedCat.name}\n`;
           reply += `├ Catatan : ${parsed.catatan}\n`;
-          reply += `└ Saldo baru : *${formatRupiah(updatedWallet?.balance || 0)}* 📈\n\n`;
+          reply += `└ Saldo baru : *${formatRupiah(newBalance)}* 📈\n\n`;
           reply += `✨ Tabunganmu bertambah! Saldo langsung siap digunakan atau disimpan dengan aman 💪`;
         } else {
           reply += `💰 *Pemasukan tercatat!*\n`;
           reply += `├ Nominal : *${formatRupiah(parsed.nominal)}*\n`;
           reply += `├ Kategori : 💼 Pemasukan\n`;
           reply += `├ Dompet : 👛 ${chosenWallet.name}\n`;
-          reply += `└ Saldo baru : *${formatRupiah(updatedWallet?.balance || 0)}*\n\n`;
+          reply += `└ Saldo baru : *${formatRupiah(newBalance)}*\n\n`;
           reply += `💪 Semangat terus! Jangan lupa sisihkan untuk tabungan ya.`;
         }
 
@@ -767,7 +838,7 @@ export async function POST(req: NextRequest) {
           status: 'income_recorded',
           is_topup: isTopUp,
           wallet: chosenWallet,
-          new_balance: updatedWallet?.balance,
+          new_balance: newBalance,
           reply,
         });
       }
