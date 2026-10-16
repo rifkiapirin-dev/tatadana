@@ -294,15 +294,56 @@ export async function createSupabaseTransaction(params: {
     const userId = await resolveSupabaseUserId(params.userIdOrEmail);
     if (!userId) return null;
 
-    // 1. Insert ke tabel transactions
+    const isUuid = (str?: string) => Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str));
+
+    // 1. Resolve walletId ke UUID Supabase
+    let targetWalletId = params.walletId;
+    const { data: userWallets } = await client.from('wallets').select('*').eq('user_id', userId);
+
+    if (!isUuid(targetWalletId)) {
+      const cleanW = (targetWalletId || '').toLowerCase();
+      const matchedW =
+        userWallets?.find((w) => {
+          const wName = w.name.toLowerCase();
+          return wName.includes(cleanW) || cleanW.includes(wName) || w.type.toLowerCase() === cleanW;
+        }) ||
+        userWallets?.find((w) => w.is_default) ||
+        userWallets?.[0];
+
+      if (matchedW) {
+        targetWalletId = matchedW.id;
+      }
+    }
+
+    if (!targetWalletId) return null;
+
+    // 2. Resolve categoryId ke UUID Supabase (atau null jika tidak cocok)
+    let targetCategoryId: string | null = null;
+    if (isUuid(params.categoryId)) {
+      targetCategoryId = params.categoryId!;
+    } else {
+      const { data: userCats } = await client.from('categories').select('*').eq('user_id', userId);
+      const cleanC = (params.categoryId || '').toLowerCase();
+      const matchedC =
+        userCats?.find((c) => {
+          const cName = c.name.toLowerCase();
+          return cName.includes(cleanC) || cleanC.includes(cName) || c.type === params.type;
+        }) || userCats?.[0];
+
+      if (matchedC) {
+        targetCategoryId = matchedC.id;
+      }
+    }
+
+    // 3. Insert ke tabel transactions Supabase
     const { data: newTx, error: txErr } = await client
       .from('transactions')
       .insert({
         user_id: userId,
-        wallet_id: params.walletId,
-        category_id: params.categoryId || null,
+        wallet_id: targetWalletId,
+        category_id: targetCategoryId,
         type: params.type,
-        amount: params.amount,
+        amount: Number(params.amount),
         notes: params.notes || '',
         source: params.source || 'telegram_text',
         transaction_date: params.transactionDate || new Date().toISOString(),
@@ -312,12 +353,11 @@ export async function createSupabaseTransaction(params: {
 
     if (txErr) {
       console.error('[Supabase Insert Tx Error]:', txErr.message);
-      return null;
     }
 
-    // 2. Hitung perubahan saldo dompet
+    // 4. Update saldo dompet di Supabase
     const delta = params.type === 'expense' ? -Number(params.amount) : Number(params.amount);
-    const updatedWallet = await updateSupabaseWalletBalance(params.walletId, delta);
+    const updatedWallet = await updateSupabaseWalletBalance(targetWalletId, delta);
 
     return {
       transaction: newTx,
