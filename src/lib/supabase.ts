@@ -484,6 +484,31 @@ export async function deleteSupabaseTransaction(transactionId: string) {
 }
 
 /**
+ * Ambil semua user dari Supabase public.users
+ */
+export async function getSupabaseUsers() {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client
+      .from('users')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('[Supabase Get Users Error]:', error.message);
+      return null;
+    }
+
+    return data || [];
+  } catch (err: any) {
+    console.error('[Supabase Get Users Catch]:', err.message);
+    return null;
+  }
+}
+
+/**
  * Ambil data user dari Supabase (berdasarkan email atau nomor HP)
  */
 export async function getSupabaseUser(emailOrPhone: string) {

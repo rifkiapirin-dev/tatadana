@@ -1,9 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { syncUserToSupabaseAuth, getSupabaseUser, isSupabaseConfigured } from '@/lib/supabase';
+import {
+  syncUserToSupabaseAuth,
+  getSupabaseUser,
+  getSupabaseUsers,
+  isSupabaseConfigured,
+} from '@/lib/supabase';
 
 export async function GET() {
-  const users = db.getUsers();
+  let users = db.getUsers();
+
+  if (isSupabaseConfigured()) {
+    try {
+      const sbUsers = await getSupabaseUsers();
+      if (sbUsers && sbUsers.length > 0) {
+        for (const sbu of sbUsers) {
+          const existing = db.getUser(sbu.id) || db.getUserByEmail(sbu.email);
+          if (!existing) {
+            db.createUser({
+              id: sbu.id,
+              email: sbu.email,
+              phone_number: sbu.phone_number,
+              full_name: sbu.full_name,
+              plan: sbu.plan || 'starter',
+              role: sbu.role || 'user',
+              status: sbu.status || 'approved',
+              password: sbu.password || '123456789',
+              avatar_url: sbu.avatar_url,
+            });
+          } else {
+            if (existing.status !== sbu.status || existing.role !== sbu.role) {
+              db.updateUser(existing.id, { status: sbu.status, role: sbu.role });
+            }
+          }
+        }
+        users = db.getUsers();
+      }
+    } catch (e: any) {
+      console.warn('Failed to sync users from Supabase in auth route:', e.message);
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     users: users.map((u) => ({

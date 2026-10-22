@@ -4,6 +4,8 @@ import {
   syncUserToSupabaseAuth,
   updateUserStatusInSupabase,
   deleteUserInSupabase,
+  getSupabaseUsers,
+  isSupabaseConfigured,
 } from '@/lib/supabase';
 
 export async function GET(req: NextRequest) {
@@ -50,7 +52,39 @@ export async function GET(req: NextRequest) {
   }
 
   // Default: Get all admin dashboard overview data
-  const users = db.getUsers();
+  let users = db.getUsers();
+
+  if (isSupabaseConfigured()) {
+    try {
+      const sbUsers = await getSupabaseUsers();
+      if (sbUsers && sbUsers.length > 0) {
+        for (const sbu of sbUsers) {
+          const existing = db.getUser(sbu.id) || db.getUserByEmail(sbu.email);
+          if (!existing) {
+            db.createUser({
+              id: sbu.id,
+              email: sbu.email,
+              phone_number: sbu.phone_number,
+              full_name: sbu.full_name,
+              plan: sbu.plan || 'starter',
+              role: sbu.role || 'user',
+              status: sbu.status || 'approved',
+              password: sbu.password || '123456789',
+              avatar_url: sbu.avatar_url,
+            });
+          } else {
+            if (existing.status !== sbu.status || existing.role !== sbu.role) {
+              db.updateUser(existing.id, { status: sbu.status, role: sbu.role });
+            }
+          }
+        }
+        users = db.getUsers();
+      }
+    } catch (e: any) {
+      console.warn('Failed to sync users from Supabase in admin route:', e.message);
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     users,
@@ -101,16 +135,20 @@ export async function POST(req: NextRequest) {
         adminId
       );
 
-      // Sinkronkan ke Supabase Auth & public.users
-      syncUserToSupabaseAuth({
-        id: newUser.id,
-        email: newUser.email,
-        full_name: newUser.full_name,
-        phone_number: newUser.phone_number,
-        role: newUser.role,
-        status: newUser.status,
-        plan: newUser.plan,
-      }).catch((e) => console.error('Admin create_user Supabase sync error:', e));
+      // Sinkronkan ke Supabase Auth & public.users secara langsung
+      try {
+        await syncUserToSupabaseAuth({
+          id: newUser.id,
+          email: newUser.email,
+          full_name: newUser.full_name,
+          phone_number: newUser.phone_number,
+          role: newUser.role,
+          status: newUser.status,
+          plan: newUser.plan,
+        });
+      } catch (e: any) {
+        console.error('Admin create_user Supabase sync error:', e.message);
+      }
 
       return NextResponse.json({ ok: true, user: newUser });
     }
@@ -123,9 +161,11 @@ export async function POST(req: NextRequest) {
       }
 
       // Sinkronkan status approval ke Supabase
-      updateUserStatusInSupabase(approved.email, 'approved').catch((e) =>
-        console.error('Admin approve_user Supabase sync error:', e)
-      );
+      try {
+        await updateUserStatusInSupabase(approved.email, 'approved');
+      } catch (e: any) {
+        console.error('Admin approve_user Supabase sync error:', e.message);
+      }
 
       return NextResponse.json({ ok: true, user: approved });
     }
@@ -178,9 +218,11 @@ export async function POST(req: NextRequest) {
       }
 
       // Sinkronkan status reject ke Supabase
-      updateUserStatusInSupabase(rejected.email, 'rejected').catch((e) =>
-        console.error('Admin reject_user Supabase sync error:', e)
-      );
+      try {
+        await updateUserStatusInSupabase(rejected.email, 'rejected');
+      } catch (e: any) {
+        console.error('Admin reject_user Supabase sync error:', e.message);
+      }
 
       return NextResponse.json({ ok: true, user: rejected });
     }
@@ -202,9 +244,11 @@ export async function POST(req: NextRequest) {
 
       // Sinkronkan penghapusan ke Supabase
       if (userEmail) {
-        deleteUserInSupabase(userEmail).catch((e) =>
-          console.error('Admin delete_user Supabase sync error:', e)
-        );
+        try {
+          await deleteUserInSupabase(userEmail);
+        } catch (e: any) {
+          console.error('Admin delete_user Supabase sync error:', e.message);
+        }
       }
 
       return NextResponse.json({ ok: deleted });
